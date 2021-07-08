@@ -1,5 +1,14 @@
 [
     {
+        "version": "17.0.0",
+        "changes": [
+            {
+                "note": "AS Refactor 1/X",
+                "pr": 250
+            }
+        ]
+    },
+    {
         "version": "16.22.0",
         "changes": [
             {
