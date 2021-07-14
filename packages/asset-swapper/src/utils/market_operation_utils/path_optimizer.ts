@@ -3,6 +3,7 @@ import * as _ from 'lodash';
 
 import { ERC20BridgeSource } from '../../network/types';
 import { MarketOperation } from '../../types';
+import { timeIt } from '../utils';
 
 import { DEFAULT_PATH_PENALTY_OPTS, Path, PathPenaltyOpts } from './path';
 import { Fill } from './types';
@@ -22,20 +23,22 @@ export async function findOptimalPathAsync(
     runLimit: number = 2 ** 8,
     opts: PathPenaltyOpts = DEFAULT_PATH_PENALTY_OPTS,
 ): Promise<Path | undefined> {
-    // Sort fill arrays by descending adjusted completed rate.
-    // Remove any paths which cannot impact the optimal path
-    const sortedPaths = reducePaths(fillsToSortedPaths(fills, side, targetInput, opts));
-    if (sortedPaths.length === 0) {
-        return undefined;
-    }
-    const rates = rateBySourcePathId(sortedPaths);
-    let optimalPath = sortedPaths[0];
-    for (const [i, path] of sortedPaths.slice(1).entries()) {
-        optimalPath = mixPaths(side, optimalPath, path, targetInput, runLimit * RUN_LIMIT_DECAY_FACTOR ** i, rates);
-        // Yield to event loop.
-        await Promise.resolve();
-    }
-    return optimalPath.isComplete() ? optimalPath : undefined;
+    return timeIt(async () => {
+        // Sort fill arrays by descending adjusted completed rate.
+        // Remove any paths which cannot impact the optimal path
+        const sortedPaths = reducePaths(fillsToSortedPaths(fills, side, targetInput, opts));
+        if (sortedPaths.length === 0) {
+            return undefined;
+        }
+        const rates = rateBySourcePathId(sortedPaths);
+        let optimalPath = sortedPaths[0];
+        for (const [i, path] of sortedPaths.slice(1).entries()) {
+            optimalPath = mixPaths(side, optimalPath, path, targetInput, runLimit * RUN_LIMIT_DECAY_FACTOR ** i, rates);
+            // Yield to event loop.
+            await Promise.resolve();
+        }
+        return optimalPath.isComplete() ? optimalPath : undefined;
+    }, 'findOptimalPathAsync');
 }
 
 // Sort fill arrays by descending adjusted completed rate.
@@ -93,7 +96,7 @@ function mixPaths(
     pathB: Path,
     targetInput: BigNumber,
     maxSteps: number,
-    rates: { [id: string]: BigNumber },
+    rates: { [id: string]: number },
 ): Path {
     const _maxSteps = Math.max(maxSteps, 32);
     let steps = 0;
@@ -126,7 +129,7 @@ function mixPaths(
     // chances of walking ideal, valid paths first.
     const sortedFills = allFills.sort((a, b) => {
         if (a.sourcePathId !== b.sourcePathId) {
-            return rates[b.sourcePathId].comparedTo(rates[a.sourcePathId]);
+            return rates[b.sourcePathId] - rates[a.sourcePathId];
         }
         return a.index - b.index;
     });
@@ -137,6 +140,6 @@ function mixPaths(
     return bestPath;
 }
 
-function rateBySourcePathId(paths: Path[]): { [id: string]: BigNumber } {
-    return _.fromPairs(paths.map(p => [p.fills[0].sourcePathId, p.adjustedRate()]));
+function rateBySourcePathId(paths: Path[]): { [id: string]: number } {
+    return _.fromPairs(paths.map(p => [p.fills[0].sourcePathId, p.adjustedRate().toNumber()]));
 }

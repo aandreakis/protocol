@@ -40,6 +40,8 @@ import { ProtocolFeeUtils } from './utils/protocol_fee_utils';
 import { QuoteRequestor } from './utils/quote_requestor';
 import { QuoteFillResult, simulateBestCaseFill, simulateWorstCaseFill } from './utils/quote_simulation';
 
+import { timeIt } from './utils/utils';
+
 export abstract class Orderbook {
     public abstract getOrdersAsync(
         makerToken: string,
@@ -272,6 +274,8 @@ export class SwapQuoter {
         marketOperation: MarketOperation,
         opts: Partial<SwapQuoteRequestOpts>,
     ): Promise<SwapQuote> {
+        return timeIt(async () => {
+
         assert.isETHAddressHex('makerToken', makerToken);
         assert.isETHAddressHex('takerToken', takerToken);
         assert.isBigNumber('assetFillAmount', assetFillAmount);
@@ -351,6 +355,7 @@ export class SwapQuoter {
         swapQuote.worstCaseQuoteInfo.gas += exchangeProxyOverhead;
 
         return swapQuote;
+    }, 'getSwapQuoteAsync');
     }
 
     private readonly _limitOrderPruningFn = (limitOrder: SignedNativeOrder) => {

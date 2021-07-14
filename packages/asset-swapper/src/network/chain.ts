@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 
 import { artifacts } from '../artifacts';
 import { CallDispatcherContract } from '../wrappers';
+import { timeIt } from '../utils/utils';
 
 import { DUMMY_PROVIDER, NULL_BYTES, ZERO_AMOUNT } from './constants';
 import { createFastAbiEncoderOverrides } from './fast_abi';
@@ -40,7 +41,7 @@ export interface CreateChainOpts {
     maxCacheAgeMs?: number;
 }
 
-const DEFAULT_CALL_GAS_LIMIT = 10e6;
+const DEFAULT_CALL_GAS_LIMIT = 32e6;
 const DEFAULT_CALLER_ADDRESS = hexUtils.random(20);
 const DISPATCHER_CONTRACT_ADDRESS = hexUtils.random(20);
 const DISPATCHER_CONTRACT_BYTECODE = artifacts.CallDispatcher.compilerOutput.evm.deployedBytecode.object;
@@ -211,8 +212,13 @@ export class LiveChain implements Chain {
 
     private async _executeAsync(queue: QueuedEthCall[]): Promise<void> {
         // dispatch each batch of calls.
-        const batches = [...generateCallBatches(queue)];
-        await Promise.all(batches.map(async b => this._dispatchBatchAsync(b)));
+        return timeIt(async () => {
+                const batches = await timeIt(() => [...generateCallBatches(queue)],
+                'generateCallBatches');
+                await Promise.all(batches.map(async b => this._dispatchBatchAsync(b)));
+            },
+            'LiveChain._executeAsync,'
+        );
     }
 
     private async _dispatchBatchAsync(calls: QueuedEthCall[]): Promise<void> {
@@ -220,8 +226,20 @@ export class LiveChain implements Chain {
             calls.forEach(c => c.reject(err));
         };
         let rawResultData;
+        const merged = LiveChain._mergeBatchCalls(calls);
         try {
-            rawResultData = await this._w3.callAsync(LiveChain._mergeBatchCalls(calls));
+            rawResultData = await timeIt(async () => this._w3.callAsync(merged),
+                'eth_call',
+                250,
+                () => {
+                    const numOverrides = Object.keys(merged.overrides).length;
+                    const overridesSize = Object.values(merged.overrides)
+                        .map(v => v.code || '')
+                        .reduce((a, v) => v.length + a, 0) / 1e3;
+                    const dataSize = merged.data.length / 1e3;
+                    console.info(`\tnum calls: ${calls.length}, num overrides: ${numOverrides}, sizes: ${overridesSize}/${dataSize} kb`);
+                },
+            );
         } catch (err) {
             // tslint:disable-next-line: no-console
             console.error(err);
@@ -280,12 +298,37 @@ function tryDecodeStringRevertErrorResult(rawResultData: Bytes): string | undefi
 }
 
 function canBatchCallWith(ethCall: QueuedEthCall, batch: QueuedEthCall[]): boolean {
+    if (batch.length === 0) {
+        return true;
+    }
+    // TODO: have the sources provide realistic gas limits and split based on that.
+    if (batch.length >= 64) {
+        return false;
+    }
     const { overrides, gasPrice } = {
         overrides: {},
         ...ethCall.opts,
     };
-    // Overrides must not conflict.
     const batchOverrides = Object.assign({}, ...batch.map(b => b.opts.overrides || {}));
+    // Split if the estimated RPC payload size would be too large.
+    {
+        let estimatedRpcSize = ethCall.opts.data.length;
+        for (const c of batch) {
+            estimatedRpcSize += c.opts.data.length;
+        }
+        for (const a in overrides) {
+            estimatedRpcSize += (ethCall.opts.overrides![a].code || '').length;
+        }
+        for (const a in batchOverrides) {
+            if (!(a in overrides)) {
+                estimatedRpcSize += (batchOverrides[a].code || '').length;
+            }
+        }
+        if (estimatedRpcSize >= 512e3) {
+            return false;
+        }
+    }
+    // Overrides must not conflict.
     for (const addr in overrides) {
         const a = overrides[addr];
         const b = batchOverrides[addr];
