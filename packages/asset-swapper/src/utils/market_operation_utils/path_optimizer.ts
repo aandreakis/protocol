@@ -26,7 +26,11 @@ export async function findOptimalPathAsync(
     return timeIt(async () => {
         // Sort fill arrays by descending adjusted completed rate.
         // Remove any paths which cannot impact the optimal path
-        const sortedPaths = reducePaths(fillsToSortedPaths(fills, side, targetInput, opts));
+        const sortedPaths = await timeIt(() =>
+            reducePaths(fillsToSortedPaths(fills, side, targetInput, opts))
+        , 'reducePaths', 100);
+        const nFills = sortedPaths.reduce((a,v) => a + v.fills.length, 0);
+        console.log(`\tnfills: ${nFills}`);
         if (sortedPaths.length === 0) {
             return undefined;
         }
