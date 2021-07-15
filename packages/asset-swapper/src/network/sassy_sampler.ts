@@ -29,7 +29,6 @@ import { SourceFilters } from './source_filters';
 import { DEFAULT_TOKEN_ADJACENCY_GRAPH_BY_CHAIN_ID } from './tokens';
 import { TwoHopFillData, TwoHopSampler } from './two_hop_sampler';
 import { Address, DexSample, ERC20BridgeSource, SourceSampler, SourceSamplerMap, TokenAdjacencyGraph } from './types';
-import { timeIt } from '../utils/utils';
 
 const { ZERO_AMOUNT } = constants;
 
@@ -106,16 +105,14 @@ export class SassySampler {
         makerToken: Address,
         takerAmounts: BigNumber[],
     ): Promise<DexSample[][]> {
-        return timeIt(async () => {
-            const tokenPaths = this._getExpandedTokenPaths(takerToken, makerToken);
-            return (
-                await Promise.all(
-                    sources.map(async s =>
-                        Promise.all(tokenPaths.map(async p => this._sampleSellsFromSourceAsync(s, p, takerAmounts))),
-                    ),
-                )
-            ).flat(2);
-        }, 'getSellSamplesAsync');
+        const tokenPaths = this._getExpandedTokenPaths(takerToken, makerToken);
+        return (
+            await Promise.all(
+                sources.map(async s =>
+                    Promise.all(tokenPaths.map(async p => this._sampleSellsFromSourceAsync(s, p, takerAmounts))),
+                ),
+            )
+        ).flat(2);
     }
 
     public async getBuySamplesAsync(

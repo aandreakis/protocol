@@ -3,7 +3,6 @@ import * as _ from 'lodash';
 
 import { ERC20BridgeSource } from '../../network/types';
 import { MarketOperation } from '../../types';
-import { timeIt } from '../utils';
 
 import { DEFAULT_PATH_PENALTY_OPTS, Path, PathPenaltyOpts } from './path';
 import { Fill } from './types';
@@ -23,26 +22,20 @@ export async function findOptimalPathAsync(
     runLimit: number = 2 ** 8,
     opts: PathPenaltyOpts = DEFAULT_PATH_PENALTY_OPTS,
 ): Promise<Path | undefined> {
-    return timeIt(async () => {
-        // Sort fill arrays by descending adjusted completed rate.
-        // Remove any paths which cannot impact the optimal path
-        const sortedPaths = await timeIt(() =>
-            reducePaths(fillsToSortedPaths(fills, side, targetInput, opts))
-        , 'reducePaths', 100);
-        const nFills = sortedPaths.reduce((a,v) => a + v.fills.length, 0);
-        console.log(`\tnfills: ${nFills}`);
-        if (sortedPaths.length === 0) {
-            return undefined;
-        }
-        const rates = rateBySourcePathId(sortedPaths);
-        let optimalPath = sortedPaths[0];
-        for (const [i, path] of sortedPaths.slice(1).entries()) {
-            optimalPath = mixPaths(side, optimalPath, path, targetInput, runLimit * RUN_LIMIT_DECAY_FACTOR ** i, rates);
-            // Yield to event loop.
-            await Promise.resolve();
-        }
-        return optimalPath.isComplete() ? optimalPath : undefined;
-    }, 'findOptimalPathAsync');
+    // Sort fill arrays by descending adjusted completed rate.
+    // Remove any paths which cannot impact the optimal path
+    const sortedPaths = reducePaths(fillsToSortedPaths(fills, side, targetInput, opts));
+    if (sortedPaths.length === 0) {
+        return undefined;
+    }
+    const rates = rateBySourcePathId(sortedPaths);
+    let optimalPath = sortedPaths[0];
+    for (const [i, path] of sortedPaths.slice(1).entries()) {
+        optimalPath = mixPaths(side, optimalPath, path, targetInput, runLimit * RUN_LIMIT_DECAY_FACTOR ** i, rates);
+        // Yield to event loop.
+        await Promise.resolve();
+    }
+    return optimalPath.isComplete() ? optimalPath : undefined;
 }
 
 // Sort fill arrays by descending adjusted completed rate.

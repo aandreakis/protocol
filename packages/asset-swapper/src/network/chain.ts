@@ -6,7 +6,6 @@ import * as crypto from 'crypto';
 
 import { artifacts } from '../artifacts';
 import { CallDispatcherContract } from '../wrappers';
-import { timeIt } from '../utils/utils';
 
 import { DUMMY_PROVIDER, NULL_BYTES, ZERO_AMOUNT } from './constants';
 import { createFastAbiEncoderOverrides } from './fast_abi';
@@ -86,7 +85,7 @@ export class LiveChain implements Chain {
     private _queue: QueuedEthCall[] = [];
 
     public static async createAsync(opts: CreateChainOpts): Promise<Chain> {
-        const fullOpts = { tickFrequency: 100, maxCacheAgeMs: 30e3, ...opts };
+        const fullOpts = { tickFrequency: 50, maxCacheAgeMs: 30e3, ...opts };
         const w3 = new Web3Wrapper(opts.provider);
         const chainId = (await w3.getChainIdAsync()) as ChainId;
         const inst = new LiveChain(chainId, w3, fullOpts.maxCacheAgeMs);
@@ -212,13 +211,8 @@ export class LiveChain implements Chain {
 
     private async _executeAsync(queue: QueuedEthCall[]): Promise<void> {
         // dispatch each batch of calls.
-        return timeIt(async () => {
-                const batches = await timeIt(() => [...generateCallBatches(queue)],
-                'generateCallBatches');
-                await Promise.all(batches.map(async b => this._dispatchBatchAsync(b)));
-            },
-            'LiveChain._executeAsync,'
-        );
+        const batches = [...generateCallBatches(queue)];
+        await Promise.all(batches.map(async b => this._dispatchBatchAsync(b)));
     }
 
     private async _dispatchBatchAsync(calls: QueuedEthCall[]): Promise<void> {
@@ -226,20 +220,8 @@ export class LiveChain implements Chain {
             calls.forEach(c => c.reject(err));
         };
         let rawResultData;
-        const merged = LiveChain._mergeBatchCalls(calls);
         try {
-            rawResultData = await timeIt(async () => this._w3.callAsync(merged),
-                'eth_call',
-                250,
-                () => {
-                    const numOverrides = Object.keys(merged.overrides).length;
-                    const overridesSize = Object.values(merged.overrides)
-                        .map(v => v.code || '')
-                        .reduce((a, v) => v.length + a, 0) / 1e3;
-                    const dataSize = merged.data.length / 1e3;
-                    console.info(`\tnum calls: ${calls.length}, num overrides: ${numOverrides}, sizes: ${overridesSize}/${dataSize} kb`);
-                },
-            );
+            rawResultData = await this._w3.callAsync(LiveChain._mergeBatchCalls(calls));
         } catch (err) {
             // tslint:disable-next-line: no-console
             console.error(err);
@@ -302,7 +284,7 @@ function canBatchCallWith(ethCall: QueuedEthCall, batch: QueuedEthCall[]): boole
         return true;
     }
     // TODO: have the sources provide realistic gas limits and split based on that.
-    if (batch.length >= 64) {
+    if (batch.length >= 48) {
         return false;
     }
     const { overrides, gasPrice } = {

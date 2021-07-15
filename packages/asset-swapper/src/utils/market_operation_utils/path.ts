@@ -286,8 +286,8 @@ export class Path {
         this.sourceFlags |= fill.flags;
         this.fills.push(fill);
         if (!(fill.sourcePathId in this._sourcePathIdsSeen)) {
-            this._numDistinctFills++;
             this._sourcePathIdsSeen[fill.sourcePathId] = true;
+            this._numDistinctFills++;
         }
         if (this._size.input.plus(fill.input).isGreaterThan(this.targetInput)) {
             const remainingInput = this.targetInput.minus(this._size.input);
